@@ -1,8 +1,8 @@
 import { stripe } from "@/lib/stripe"
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
 import { type NextRequest, NextResponse } from "next/server"
 import type Stripe from "stripe"
+import connectDB from "@/lib/mongodb"
+import User from "@/lib/models/User"
 
 export async function POST(request: NextRequest) {
   const body = await request.text()
@@ -17,21 +17,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 })
   }
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-        },
-      },
-    },
-  )
+  await connectDB()
 
   try {
     switch (event.type) {
@@ -40,17 +26,13 @@ export async function POST(request: NextRequest) {
         const subscription = event.data.object as Stripe.Subscription
         const userId = subscription.client_reference_id
 
-        const planType = subscription.items.data[0]?.price?.metadata?.plan_type || "pro"
-
-        await supabase.from("subscriptions").upsert({
-          user_id: userId,
-          stripe_customer_id: subscription.customer as string,
-          stripe_subscription_id: subscription.id,
-          plan_type: planType,
-          status: subscription.status,
-          current_period_start: new Date(subscription.current_period_start * 1000),
-          current_period_end: new Date(subscription.current_period_end * 1000),
-        })
+        if (userId) {
+          const planType = subscription.items.data[0]?.price?.metadata?.plan_type || "pro"
+          await User.findByIdAndUpdate(userId, {
+            subscriptionTier: planType,
+            subscriptionStatus: subscription.status,
+          })
+        }
         break
       }
 
@@ -58,7 +40,12 @@ export async function POST(request: NextRequest) {
         const subscription = event.data.object as Stripe.Subscription
         const userId = subscription.client_reference_id
 
-        await supabase.from("subscriptions").update({ plan_type: "free", status: "canceled" }).eq("user_id", userId)
+        if (userId) {
+          await User.findByIdAndUpdate(userId, {
+            subscriptionTier: "free",
+            subscriptionStatus: "cancelled",
+          })
+        }
         break
       }
     }

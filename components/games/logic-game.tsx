@@ -9,7 +9,7 @@ import { generateId } from "@/lib/utils"
 import { toast } from "sonner"
 
 interface LogicGameProps {
-  userId: string
+  userId?: string
 }
 
 interface Puzzle {
@@ -100,6 +100,10 @@ export function LogicGame({ userId }: LogicGameProps) {
 
   const handleSaveScore = async () => {
     if (!difficulty) return
+    if (!userId) {
+      toast.error("Please log in to save your score")
+      return
+    }
 
     try {
       const gameScore = {
@@ -124,15 +128,15 @@ export function LogicGame({ userId }: LogicGameProps) {
         <GameHeader title="Logic Puzzles" description="Solve complex pattern puzzles" />
         <div className="grid md:grid-cols-3 gap-6 mt-12">
           {Object.entries(difficultyConfig).map(([level, config]) => (
-            <button
+            <div
               key={level}
               onClick={() => startGame(level as "easy" | "medium" | "hard")}
-              className="glass p-8 rounded-xl hover:bg-card/60 transition-smooth text-center"
+              className="glass p-8 rounded-xl hover:bg-card/60 transition-smooth text-center cursor-pointer"
             >
               <h3 className="text-2xl font-bold capitalize mb-2">{level}</h3>
               <p className="text-muted-foreground mb-4">{config.puzzles} puzzles</p>
-              <Button className="w-full">Start Game</Button>
-            </button>
+              <Button className="w-full pointer-events-none">Start Game</Button>
+            </div>
           ))}
         </div>
       </div>

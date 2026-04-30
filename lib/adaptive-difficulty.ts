@@ -1,5 +1,8 @@
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
+"use server"
+
+import connectDB from "@/lib/mongodb"
+import AdaptiveDifficulty from "@/lib/models/AdaptiveDifficulty"
+import PerformanceHistory from "@/lib/models/PerformanceHistory"
 
 interface DifficultyMetrics {
   currentDifficulty: number
@@ -17,30 +20,11 @@ interface PerformanceData {
 }
 
 export async function getAdaptiveDifficulty(userId: string, gameId: string): Promise<DifficultyMetrics> {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-        },
-      },
-    },
-  )
+  await connectDB()
 
-  const { data, error } = await supabase
-    .from("adaptive_difficulty")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
-    .single()
+  const data = await AdaptiveDifficulty.findOne({ userId, gameId }).lean()
 
-  if (error || !data) {
+  if (!data) {
     return {
       currentDifficulty: 1,
       performanceScore: 0.5,
@@ -51,11 +35,11 @@ export async function getAdaptiveDifficulty(userId: string, gameId: string): Pro
   }
 
   return {
-    currentDifficulty: data.current_difficulty,
-    performanceScore: data.performance_score,
-    streakCorrect: data.streak_correct,
-    streakIncorrect: data.streak_incorrect,
-    avgResponseTime: data.avg_response_time,
+    currentDifficulty: data.currentDifficulty,
+    performanceScore: data.performanceScore,
+    streakCorrect: data.streakCorrect,
+    streakIncorrect: data.streakIncorrect,
+    avgResponseTime: data.avgResponseTime,
   }
 }
 
@@ -64,21 +48,7 @@ export async function updateAdaptiveDifficulty(
   gameId: string,
   performanceData: PerformanceData,
 ): Promise<void> {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-        },
-      },
-    },
-  )
+  await connectDB()
 
   // Get current metrics
   const current = await getAdaptiveDifficulty(userId, gameId)
@@ -100,30 +70,27 @@ export async function updateAdaptiveDifficulty(
   }
 
   // Update adaptive difficulty
-  await supabase
-    .from("adaptive_difficulty")
-    .upsert({
-      user_id: userId,
-      game_id: gameId,
-      current_difficulty: newDifficulty,
-      performance_score: newPerformanceScore,
-      streak_correct: newStreakCorrect,
-      streak_incorrect: newStreakIncorrect,
-      avg_response_time: newAvgResponseTime,
-      last_updated: new Date().toISOString(),
-    })
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
+  await AdaptiveDifficulty.findOneAndUpdate(
+    { userId, gameId },
+    {
+      currentDifficulty: newDifficulty,
+      performanceScore: newPerformanceScore,
+      streakCorrect: newStreakCorrect,
+      streakIncorrect: newStreakIncorrect,
+      avgResponseTime: newAvgResponseTime,
+    },
+    { upsert: true, new: true }
+  )
 
   // Store performance history
-  await supabase.from("performance_history").insert({
-    user_id: userId,
-    game_id: gameId,
+  await PerformanceHistory.create({
+    userId,
+    gameId,
     score: performanceData.score,
-    difficulty_level: current.currentDifficulty,
-    response_time: performanceData.responseTime,
-    correct_answers: performanceData.correctAnswers,
-    total_questions: performanceData.totalQuestions,
+    difficultyLevel: current.currentDifficulty,
+    responseTime: performanceData.responseTime,
+    correctAnswers: performanceData.correctAnswers,
+    totalQuestions: performanceData.totalQuestions,
   })
 }
 

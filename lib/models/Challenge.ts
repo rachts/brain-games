@@ -2,17 +2,25 @@ import mongoose from "mongoose"
 
 const challengeSchema = new mongoose.Schema(
   {
-    creatorId: {
+    challengerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      sparse: true,
+      required: true,
+    },
+    opponentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
     gameId: String,
+    gameType: String,
     difficulty: String,
     targetScore: Number,
+    challengerScore: Number,
+    opponentScore: Number,
+    shareToken: String,
     status: {
       type: String,
-      enum: ["pending", "accepted", "completed"],
+      enum: ["pending", "accepted", "completed", "declined"],
       default: "pending",
     },
     createdAt: {

@@ -9,7 +9,7 @@ import { generateId } from "@/lib/utils"
 import { toast } from "sonner"
 
 interface SpeedGameProps {
-  userId: string
+  userId?: string
 }
 
 export function SpeedGame({ userId }: SpeedGameProps) {
@@ -70,6 +70,10 @@ export function SpeedGame({ userId }: SpeedGameProps) {
 
   const handleSaveScore = async () => {
     if (!difficulty) return
+    if (!userId) {
+      toast.error("Please log in to save your score")
+      return
+    }
 
     try {
       const avgReaction =
@@ -98,15 +102,15 @@ export function SpeedGame({ userId }: SpeedGameProps) {
         <GameHeader title="Speed Challenge" description="React fast to visual stimuli" />
         <div className="grid md:grid-cols-3 gap-6 mt-12">
           {Object.entries(difficultyConfig).map(([level, config]) => (
-            <button
+            <div
               key={level}
               onClick={() => startGame(level as "easy" | "medium" | "hard")}
-              className="glass p-8 rounded-xl hover:bg-card/60 transition-smooth text-center"
+              className="glass p-8 rounded-xl hover:bg-card/60 transition-smooth text-center cursor-pointer"
             >
               <h3 className="text-2xl font-bold capitalize mb-2">{level}</h3>
               <p className="text-muted-foreground mb-4">{config.duration}s</p>
-              <Button className="w-full">Start Game</Button>
-            </button>
+              <Button className="w-full pointer-events-none">Start Game</Button>
+            </div>
           ))}
         </div>
       </div>

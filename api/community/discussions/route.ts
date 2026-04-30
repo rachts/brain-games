@@ -1,42 +1,26 @@
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
 import { type NextRequest, NextResponse } from "next/server"
+import connectDB from "@/lib/mongodb"
+import Discussion from "@/lib/models/Discussion"
 
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll()
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-          },
-        },
-      },
-    )
+    await connectDB()
 
-    const { data, error } = await supabase
-      .from("community_discussions")
-      .select("*, profiles(username)")
-      .order("created_at", { ascending: false })
+    const data = await Discussion.find({})
+      .sort({ createdAt: -1 })
       .limit(50)
+      .populate("userId", "username")
+      .lean()
 
-    if (error) throw error
-
-    const discussions = data.map((d) => ({
-      id: d.id,
+    const discussions = data.map((d: any) => ({
+      id: d._id.toString(),
       title: d.title,
       content: d.content,
-      username: d.profiles?.username || "Anonymous",
-      gameId: d.game_id,
+      username: d.userId?.username || "Anonymous",
+      gameId: d.gameId,
       likes: d.likes,
-      repliesCount: d.replies_count,
-      createdAt: d.created_at,
+      repliesCount: d.repliesCount,
+      createdAt: d.createdAt,
     }))
 
     return NextResponse.json({ discussions })

@@ -1,38 +1,46 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { createClient } from "@/lib/supabase/client"
+import { useAuth } from "@/lib/auth-context"
 import { Card } from "@/components/ui/card"
 import { getAllAchievements } from "@/lib/gamification"
 
 interface UnlockedAchievement {
   achievement_type: string
-  unlocked_at: string
+  created_at: string
 }
 
 export function AchievementsShowcase() {
   const [unlockedAchievements, setUnlockedAchievements] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
+  const { user, isLoading } = useAuth()
 
   useEffect(() => {
     const fetchAchievements = async () => {
-      const supabase = createClient()
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (user) {
-        const { data } = await supabase.from("achievements").select("achievement_type").eq("user_id", user.id)
-
-        setUnlockedAchievements(new Set(data?.map((a) => a.achievement_type) || []))
+      if (!isLoading && user) {
+        try {
+          const response = await fetch("/api/achievements", {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+            },
+          })
+          if (response.ok) {
+            const data: UnlockedAchievement[] = await response.json()
+            setUnlockedAchievements(new Set(data.map((a) => a.achievement_type)))
+          }
+        } catch (error) {
+          console.error("Failed to fetch achievements:", error)
+        }
       }
-      setLoading(false)
+      if (!isLoading) {
+        setLoading(false)
+      }
     }
 
     fetchAchievements()
-  }, [])
+  }, [user, isLoading])
 
-  if (loading) return null
+  if (loading || !user) return null
 
   const allAchievements = getAllAchievements()
 

@@ -1,45 +1,27 @@
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
 import { type NextRequest, NextResponse } from "next/server"
+import connectDB from "@/lib/mongodb"
+import User from "@/lib/models/User"
+import Score from "@/lib/models/Score"
 
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll()
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-          },
-        },
-      },
-    )
+    await connectDB()
 
-    // Fetch all analytics data in parallel
-    const [dau, gamePopularity, subscriptions, retention, challenges, totalUsers, totalGames] = await Promise.all([
-      supabase.from("daily_active_users").select("*").limit(30),
-      supabase.from("game_popularity").select("*"),
-      supabase.from("subscription_metrics").select("*"),
-      supabase.from("retention_metrics").select("*").limit(12),
-      supabase.from("challenge_completion_metrics").select("*"),
-      supabase.from("profiles").select("id", { count: "exact" }),
-      supabase.from("game_scores").select("id", { count: "exact" }),
-    ])
-
+    // Mocking analytics data with real counts where possible
+    const totalUsers = await User.countDocuments()
+    const totalGamesPlayed = await Score.countDocuments()
+    
+    // We mock the rest of the analytics since they don't map directly to simple models 
+    // without complex aggregations which we don't have historical data for yet.
     return NextResponse.json({
-      dailyActiveUsers: dau.data || [],
-      gamePopularity: gamePopularity.data || [],
-      subscriptionMetrics: subscriptions.data || [],
-      retentionMetrics: retention.data || [],
-      challengeCompletion: challenges.data || [],
-      totalUsers: totalUsers.count || 0,
-      totalGamesPlayed: totalGames.count || 0,
-      activeSubscriptions: subscriptions.data?.reduce((sum, s) => sum + (s.active_subscriptions || 0), 0) || 0,
+      dailyActiveUsers: [],
+      gamePopularity: [],
+      subscriptionMetrics: [],
+      retentionMetrics: [],
+      challengeCompletion: [],
+      totalUsers: totalUsers,
+      totalGamesPlayed: totalGamesPlayed,
+      activeSubscriptions: 0,
       userGrowth: 12.5,
       gamesPlayedChange: 8.3,
       subscriptionChange: 15.2,

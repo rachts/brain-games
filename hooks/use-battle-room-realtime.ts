@@ -1,8 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { subscribeToBattleRoom, subscribeToBattleParticipants, unsubscribeFromChannel } from "@/lib/realtime"
-import type { RealtimeChannel } from "@supabase/supabase-js"
+import { subscribeToBattleRoom, subscribeToBattleParticipants, unsubscribeFromChannel, type PollingChannel } from "@/lib/realtime"
 
 interface BattleParticipant {
   userId: string
@@ -13,7 +12,7 @@ interface BattleParticipant {
 export function useBattleRoomRealtime(roomId: string) {
   const [participants, setParticipants] = useState<BattleParticipant[]>([])
   const [roomStatus, setRoomStatus] = useState("waiting")
-  const [channels, setChannels] = useState<RealtimeChannel[]>([])
+  const [channels, setChannels] = useState<PollingChannel[]>([])
 
   useEffect(() => {
     const roomChannel = subscribeToBattleRoom(roomId, (update) => {

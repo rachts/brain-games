@@ -1,4 +1,9 @@
-import { createClient } from "@/lib/supabase/client"
+"use server"
+
+import connectDB from "@/lib/mongodb"
+import User from "@/lib/models/User"
+import WeeklyChallengeModel from "@/lib/models/WeeklyChallenge"
+import UserAchievement from "@/lib/models/Achievement"
 
 export interface WeeklyChallenge {
   id: string
@@ -103,7 +108,6 @@ const ACHIEVEMENTS: Record<string, Achievement> = {
   },
 }
 
-// Get current week dates
 function getWeekDates() {
   const now = new Date()
   const dayOfWeek = now.getDay()
@@ -119,9 +123,8 @@ function getWeekDates() {
   }
 }
 
-// Create weekly challenges for user
 export async function createWeeklyChallenges(userId: string) {
-  const supabase = createClient()
+  await connectDB()
   const { start, end } = getWeekDates()
 
   const challenges = [
@@ -132,145 +135,130 @@ export async function createWeeklyChallenges(userId: string) {
   ]
 
   for (const challenge of challenges) {
-    const { data: existing } = await supabase
-      .from("weekly_challenges")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("challenge_type", challenge.type)
-      .eq("week_start", start)
-      .single()
+    const existing = await WeeklyChallengeModel.findOne({
+      userId,
+      challengeType: challenge.type,
+      weekStart: start,
+    })
 
     if (!existing) {
-      await supabase.from("weekly_challenges").insert({
-        user_id: userId,
-        challenge_type: challenge.type,
-        target_score: challenge.target,
-        week_start: start,
-        week_end: end,
+      await WeeklyChallengeModel.create({
+        userId,
+        challengeType: challenge.type,
+        targetScore: challenge.target,
+        weekStart: start,
+        weekEnd: end,
       })
     }
   }
 }
 
-// Update weekly challenge progress
 export async function updateChallengeProgress(userId: string, gameType: string, score: number) {
-  const supabase = createClient()
+  await connectDB()
   const { start } = getWeekDates()
 
-  const { data: challenge } = await supabase
-    .from("weekly_challenges")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("challenge_type", gameType)
-    .eq("week_start", start)
-    .single()
+  const challenge = await WeeklyChallengeModel.findOne({
+    userId,
+    challengeType: gameType,
+    weekStart: start,
+  })
 
   if (challenge) {
-    const newProgress = challenge.current_progress + score
-    const completed = newProgress >= challenge.target_score
+    const newProgress = challenge.currentProgress + score
+    const completed = newProgress >= challenge.targetScore
 
-    await supabase
-      .from("weekly_challenges")
-      .update({
-        current_progress: newProgress,
-        completed,
-      })
-      .eq("id", challenge.id)
+    challenge.currentProgress = newProgress
+    challenge.completed = completed
+    await challenge.save()
 
     if (completed && !challenge.completed) {
-      // Award bonus XP for completing challenge
-      const { data: stats } = await supabase.from("user_stats").select("*").eq("user_id", userId).single()
+      const user = await User.findById(userId)
 
-      if (stats) {
+      if (user) {
         const bonusXP = 500
-        const newXP = stats.total_xp + bonusXP
+        const newXP = (user.xp || 0) + bonusXP
         const newLevel = Math.floor(newXP / 100) + 1
 
-        await supabase
-          .from("user_stats")
-          .update({
-            total_xp: newXP,
-            xp_level: newLevel,
-          })
-          .eq("user_id", userId)
+        user.xp = newXP
+        user.level = newLevel
+        await user.save()
       }
     }
   }
 }
 
-// Get user's weekly challenges
 export async function getWeeklyChallenges(userId: string): Promise<WeeklyChallenge[]> {
-  const supabase = createClient()
+  await connectDB()
   const { start } = getWeekDates()
 
-  const { data, error } = await supabase
-    .from("weekly_challenges")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("week_start", start)
+  const data = await WeeklyChallengeModel.find({
+    userId,
+    weekStart: start,
+  }).lean()
 
-  if (error) return []
-  return data || []
+  return data.map(d => ({
+    id: d._id.toString(),
+    user_id: d.userId.toString(),
+    challenge_type: d.challengeType,
+    target_score: d.targetScore,
+    current_progress: d.currentProgress,
+    completed: d.completed,
+    week_start: d.weekStart,
+    week_end: d.weekEnd
+  }))
 }
 
-// Check and unlock achievements
 export async function checkAndUnlockAchievements(userId: string) {
-  const supabase = createClient()
+  await connectDB()
 
-  const { data: stats } = await supabase.from("user_stats").select("*").eq("user_id", userId).single()
+  const stats = await User.findById(userId)
 
   if (!stats) return
 
-  const { data: unlockedAchievements } = await supabase
-    .from("achievements")
-    .select("achievement_type")
-    .eq("user_id", userId)
-
-  const unlockedTypes = new Set(unlockedAchievements?.map((a) => a.achievement_type) || [])
+  const unlockedAchievements = await UserAchievement.find({ userId }).lean()
+  const unlockedTypes = new Set(unlockedAchievements.map((a) => a.achievementId))
 
   const achievementsToUnlock = []
 
-  if (stats.total_games_played >= 1 && !unlockedTypes.has("first_game")) {
+  if ((stats.totalGamesPlayed || 0) >= 1 && !unlockedTypes.has("first_game")) {
     achievementsToUnlock.push("first_game")
   }
-  if (stats.total_games_played >= 10 && !unlockedTypes.has("ten_games")) {
+  if ((stats.totalGamesPlayed || 0) >= 10 && !unlockedTypes.has("ten_games")) {
     achievementsToUnlock.push("ten_games")
   }
-  if (stats.total_games_played >= 100 && !unlockedTypes.has("hundred_games")) {
+  if ((stats.totalGamesPlayed || 0) >= 100 && !unlockedTypes.has("hundred_games")) {
     achievementsToUnlock.push("hundred_games")
   }
-  if (stats.total_games_played >= 1000 && !unlockedTypes.has("thousand_games")) {
+  if ((stats.totalGamesPlayed || 0) >= 1000 && !unlockedTypes.has("thousand_games")) {
     achievementsToUnlock.push("thousand_games")
   }
-  if (stats.current_streak >= 7 && !unlockedTypes.has("seven_day_streak")) {
+  if ((stats.currentStreak || 0) >= 7 && !unlockedTypes.has("seven_day_streak")) {
     achievementsToUnlock.push("seven_day_streak")
   }
-  if (stats.current_streak >= 30 && !unlockedTypes.has("thirty_day_streak")) {
+  if ((stats.currentStreak || 0) >= 30 && !unlockedTypes.has("thirty_day_streak")) {
     achievementsToUnlock.push("thirty_day_streak")
   }
-  if (stats.xp_level >= 10 && !unlockedTypes.has("level_10")) {
+  if ((stats.level || 1) >= 10 && !unlockedTypes.has("level_10")) {
     achievementsToUnlock.push("level_10")
   }
-  if (stats.xp_level >= 50 && !unlockedTypes.has("level_50")) {
+  if ((stats.level || 1) >= 50 && !unlockedTypes.has("level_50")) {
     achievementsToUnlock.push("level_50")
   }
 
   for (const achievementType of achievementsToUnlock) {
-    await supabase.from("achievements").insert({
-      user_id: userId,
-      achievement_type: achievementType,
+    await UserAchievement.create({
+      userId,
+      achievementId: achievementType,
     })
   }
 
   return achievementsToUnlock
 }
 
-// Get achievement details
 export function getAchievementDetails(type: string): Achievement | undefined {
   return ACHIEVEMENTS[type]
 }
 
-// Get all achievements
 export function getAllAchievements(): Achievement[] {
   return Object.values(ACHIEVEMENTS)
 }

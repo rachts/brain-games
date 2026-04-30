@@ -1,4 +1,7 @@
-import { createClient } from "@/lib/supabase/client"
+"use server"
+
+import connectDB from "@/lib/mongodb"
+import Score from "@/lib/models/Score"
 
 export interface AIInsight {
   id: string
@@ -8,8 +11,9 @@ export interface AIInsight {
 }
 
 export async function generateInsights(): Promise<AIInsight | null> {
+  // Client-side can call the API route, but if this is used from a server component:
   try {
-    const response = await fetch("/api/ai/insights", {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/ai/insights`, {
       method: "POST",
     })
 
@@ -25,7 +29,7 @@ export async function generateInsights(): Promise<AIInsight | null> {
 
 export async function getInsights(): Promise<AIInsight[]> {
   try {
-    const response = await fetch("/api/ai/insights")
+    const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/ai/insights`)
 
     if (!response.ok) throw new Error("Failed to fetch insights")
 
@@ -37,25 +41,23 @@ export async function getInsights(): Promise<AIInsight[]> {
 }
 
 export async function getGameRecommendations(userId: string): Promise<string[]> {
-  const supabase = createClient()
+  await connectDB()
 
-  const { data: scores } = await supabase
-    .from("game_scores")
-    .select("game_type, score")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
+  const scores = await Score.find({ userId })
+    .sort({ createdAt: -1 })
     .limit(50)
+    .lean()
 
   if (!scores || scores.length === 0) return ["memory", "speed", "logic", "attention"]
 
   // Calculate average score by game type
   const gameStats: Record<string, { total: number; count: number }> = {}
   scores.forEach((score) => {
-    if (!gameStats[score.game_type]) {
-      gameStats[score.game_type] = { total: 0, count: 0 }
+    if (!gameStats[score.gameId]) {
+      gameStats[score.gameId] = { total: 0, count: 0 }
     }
-    gameStats[score.game_type].total += score.score
-    gameStats[score.game_type].count++
+    gameStats[score.gameId].total += score.score
+    gameStats[score.gameId].count++
   })
 
   // Find weakest games

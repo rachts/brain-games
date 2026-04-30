@@ -1,12 +1,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { subscribeToLeaderboard, unsubscribeFromChannel, type LiveLeaderboardUpdate } from "@/lib/realtime"
-import type { RealtimeChannel } from "@supabase/supabase-js"
+import { subscribeToLeaderboard, unsubscribeFromChannel, type LiveLeaderboardUpdate, type PollingChannel } from "@/lib/realtime"
 
 export function useRealtimeLeaderboard() {
   const [updates, setUpdates] = useState<LiveLeaderboardUpdate[]>([])
-  const [channel, setChannel] = useState<RealtimeChannel | null>(null)
+  const [channel, setChannel] = useState<PollingChannel | null>(null)
 
   useEffect(() => {
     const newChannel = subscribeToLeaderboard((update) => {

@@ -1,44 +1,29 @@
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
 import { type NextRequest, NextResponse } from "next/server"
+import connectDB from "@/lib/mongodb"
+import User from "@/lib/models/User"
+import Score from "@/lib/models/Score"
 
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll()
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-          },
-        },
-      },
-    )
+    await connectDB()
 
-    const { data, error } = await supabase
-      .from("public_leaderboard")
-      .select("*")
-      .order("rank", { ascending: true })
+    const users = await User.find({})
+      .sort({ totalPoints: -1 })
       .limit(100)
+      .select("username totalPoints totalGamesPlayed")
+      .lean()
 
-    if (error) throw error
-
-    const leaderboard = data.map((entry) => ({
-      rank: entry.rank,
-      username: entry.username,
-      totalPoints: entry.total_points,
-      gamesPlayed: entry.games_played,
-      avgScore: entry.avg_score,
+    const leaderboard = users.map((user, index) => ({
+      rank: index + 1,
+      username: user.username || "Anonymous",
+      totalPoints: user.totalPoints || 0,
+      gamesPlayed: user.totalGamesPlayed || 0,
+      avgScore: user.totalGamesPlayed ? Math.round((user.totalPoints || 0) / user.totalGamesPlayed) : 0,
     }))
 
     return NextResponse.json({ leaderboard })
   } catch (error) {
-    console.error("[v0] Error fetching leaderboard:", error)
+    console.error("[v0] Error fetching community leaderboard:", error)
     return NextResponse.json({ error: "Failed to fetch leaderboard" }, { status: 500 })
   }
 }

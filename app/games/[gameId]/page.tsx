@@ -25,12 +25,10 @@ export default function GamePage() {
   const gameId = params.gameId as string
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      router.push("/login")
-    }
+    // Make login optional: we no longer redirect if user is not logged in.
   }, [user, isLoading, router])
 
-  if (isLoading || !user) {
+  if (isLoading) {
     return (
       <>
         <Navbar />
@@ -63,7 +61,7 @@ export default function GamePage() {
     <>
       <Navbar />
       <main className="min-h-screen bg-gradient-to-b from-background to-card">
-        <GameComponent userId={user.id} />
+        <GameComponent userId={user?.id} />
       </main>
     </>
   )

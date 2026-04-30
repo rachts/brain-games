@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { createClient } from "@/lib/supabase/client"
+import { useAuth } from "@/lib/auth-context"
 import { Card } from "@/components/ui/card"
 import { getWeeklyChallenges } from "@/lib/gamification"
 
@@ -23,25 +23,24 @@ const CHALLENGE_ICONS: Record<string, string> = {
 export function WeeklyChallenges() {
   const [challenges, setChallenges] = useState<Challenge[]>([])
   const [loading, setLoading] = useState(true)
+  const { user, isLoading } = useAuth()
 
   useEffect(() => {
     const fetchChallenges = async () => {
-      const supabase = createClient()
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (user) {
+      if (!isLoading && user) {
         const data = await getWeeklyChallenges(user.id)
-        setChallenges(data)
+        // Ensure data is plain object without symbols if passing from server action to client
+        setChallenges(JSON.parse(JSON.stringify(data)))
       }
-      setLoading(false)
+      if (!isLoading) {
+        setLoading(false)
+      }
     }
 
     fetchChallenges()
-  }, [])
+  }, [user, isLoading])
 
-  if (loading) return null
+  if (loading || !user) return null
 
   return (
     <div className="space-y-3">

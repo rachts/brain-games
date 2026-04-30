@@ -1,69 +1,85 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import connectDB from "@/lib/mongodb"
+import Challenge from "@/lib/models/Challenge"
+import User from "@/lib/models/User"
+import { getTokenFromRequest, verifyToken } from "@/lib/jwt"
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    await connectDB()
+    const token = getTokenFromRequest(request)
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const decoded = verifyToken(token)
+    if (!decoded) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    
+    const challenges = await Challenge.find({
+      $or: [{ challengerId: decoded.userId }, { opponentId: decoded.userId }]
+    })
+    .sort({ createdAt: -1 })
+    .populate("challengerId", "username")
+    .populate("opponentId", "username")
+    .lean()
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const formattedData = challenges.map(c => ({
+      id: c._id.toString(),
+      challenger_id: c.challengerId?._id?.toString(),
+      opponent_id: c.opponentId?._id?.toString(),
+      game_type: c.gameType,
+      status: c.status,
+      share_token: c.shareToken,
+      challenger_score: c.challengerScore,
+      opponent_score: c.opponentScore,
+      created_at: c.createdAt,
+      challenger_profile: {
+        display_name: c.challengerId?.username,
+        username: c.challengerId?.username,
+        avatar_url: null
+      },
+      opponent_profile: {
+        display_name: c.opponentId?.username,
+        username: c.opponentId?.username,
+        avatar_url: null
+      }
+    }))
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const { data, error } = await supabase
-      .from("friend_challenges")
-      .select(
-        `
-        *,
-        challenger_profile:challenger_id(display_name, username, avatar_url),
-        opponent_profile:opponent_id(display_name, username, avatar_url)
-      `,
-      )
-      .or(`challenger_id.eq.${user.id},opponent_id.eq.${user.id}`)
-      .order("created_at", { ascending: false })
-
-    if (error) throw error
-
-    return NextResponse.json(data)
+    return NextResponse.json(formattedData)
   } catch (error) {
+    console.error("GET challenges error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    await connectDB()
+    const token = getTokenFromRequest(request)
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const decoded = verifyToken(token)
+    if (!decoded) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
     const { opponentId, gameType } = await request.json()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
     const shareToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
 
-    const { data, error } = await supabase
-      .from("friend_challenges")
-      .insert({
-        challenger_id: user.id,
-        opponent_id: opponentId,
-        game_type: gameType,
-        status: "pending",
-        share_token: shareToken,
-      })
-      .select()
-      .single()
+    const challenge = new Challenge({
+      challengerId: decoded.userId,
+      opponentId: opponentId,
+      gameType,
+      status: "pending",
+      shareToken
+    })
+    await challenge.save()
 
-    if (error) throw error
-
-    return NextResponse.json(data)
+    return NextResponse.json({
+      id: challenge._id.toString(),
+      challenger_id: challenge.challengerId.toString(),
+      opponent_id: challenge.opponentId?.toString(),
+      game_type: challenge.gameType,
+      status: challenge.status,
+      share_token: challenge.shareToken,
+      created_at: challenge.createdAt,
+    })
   } catch (error) {
+    console.error("POST challenges error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

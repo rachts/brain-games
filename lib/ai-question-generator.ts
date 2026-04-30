@@ -1,34 +1,22 @@
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
+"use server"
+
+import connectDB from "@/lib/mongodb"
+import GeneratedQuestion from "@/lib/models/GeneratedQuestion"
 
 export async function getCachedOrGenerateQuestions(gameId: string, difficulty: number, count = 5) {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-        },
-      },
-    },
-  )
+  await connectDB()
 
   // Try to get cached questions
-  const { data: cachedQuestions } = await supabase
-    .from("generated_questions")
-    .select("question_data")
-    .eq("game_id", gameId)
-    .eq("difficulty_level", difficulty)
-    .gt("expires_at", new Date().toISOString())
+  const cachedQuestions = await GeneratedQuestion.find({
+    gameId,
+    difficultyLevel: difficulty,
+    expiresAt: { $gt: new Date() }
+  })
     .limit(count)
+    .lean()
 
   if (cachedQuestions && cachedQuestions.length >= count) {
-    return cachedQuestions.map((q) => q.question_data)
+    return cachedQuestions.map((q) => q.questionData)
   }
 
   // Generate new questions via API
@@ -45,10 +33,10 @@ export async function getCachedOrGenerateQuestions(gameId: string, difficulty: n
 
   // Cache the generated questions
   for (const question of questions) {
-    await supabase.from("generated_questions").insert({
-      game_id: gameId,
-      difficulty_level: difficulty,
-      question_data: question,
+    await GeneratedQuestion.create({
+      gameId: gameId,
+      difficultyLevel: difficulty,
+      questionData: question,
     })
   }
 

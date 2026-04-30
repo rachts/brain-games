@@ -6,6 +6,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  transpilePackages: ['recharts', 'react-smooth'],
 }
 
 export default nextConfig

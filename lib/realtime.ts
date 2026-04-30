@@ -1,18 +1,3 @@
-import { createBrowserClient } from "@supabase/ssr"
-import type { RealtimeChannel } from "@supabase/supabase-js"
-
-let supabaseClient: ReturnType<typeof createBrowserClient> | null = null
-
-function getSupabaseClient() {
-  if (!supabaseClient) {
-    supabaseClient = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    )
-  }
-  return supabaseClient
-}
-
 export interface LiveLeaderboardUpdate {
   userId: string
   username: string
@@ -34,112 +19,94 @@ export interface FriendNotification {
   timestamp: string
 }
 
-export function subscribeToLeaderboard(callback: (update: LiveLeaderboardUpdate) => void): RealtimeChannel {
-  const supabase = getSupabaseClient()
-
-  const channel = supabase
-    .channel("public:leaderboard")
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "public_leaderboard",
-      },
-      (payload) => {
-        callback({
-          userId: payload.new.user_id,
-          username: payload.new.username,
-          totalPoints: payload.new.total_points,
-          rank: payload.new.rank,
-        })
-      },
-    )
-    .subscribe()
-
-  return channel
+// Mocking RealtimeChannel for compatibility with existing hooks
+export interface PollingChannel {
+  unsubscribe: () => void
 }
 
-export function subscribeToBattleRoom(roomId: string, callback: (update: BattleRoomUpdate) => void): RealtimeChannel {
-  const supabase = getSupabaseClient()
+export function subscribeToLeaderboard(callback: (update: LiveLeaderboardUpdate) => void): PollingChannel {
+  let lastData: any = null
+  const interval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/community/leaderboard')
+      if (res.ok) {
+        const data = await res.json()
+        if (data.leaderboard && data.leaderboard.length > 0) {
+          const top = data.leaderboard[0]
+          // Just trigger callback with top player for now as a mock for realtime
+          if (JSON.stringify(top) !== JSON.stringify(lastData)) {
+            callback({
+              userId: top.username,
+              username: top.username,
+              totalPoints: top.totalPoints,
+              rank: top.rank,
+            })
+            lastData = top
+          }
+        }
+      }
+    } catch (e) {}
+  }, 5000)
 
-  const channel = supabase
-    .channel(`battle:${roomId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "battle_rooms",
-        filter: `id=eq.${roomId}`,
-      },
-      (payload) => {
-        callback({
-          roomId: payload.new.id,
-          status: payload.new.status,
-          participants: payload.new.max_players,
-        })
-      },
-    )
-    .subscribe()
+  return {
+    unsubscribe: () => clearInterval(interval)
+  }
+}
 
-  return channel
+export function subscribeToBattleRoom(roomId: string, callback: (update: BattleRoomUpdate) => void): PollingChannel {
+  const interval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/community/battle-rooms')
+      if (res.ok) {
+        const data = await res.json()
+        const room = data.rooms?.find((r: any) => r.id === roomId)
+        if (room) {
+          callback({
+            roomId: room.id,
+            status: room.status,
+            participants: room.currentPlayers,
+          })
+        }
+      }
+    } catch (e) {}
+  }, 3000)
+
+  return {
+    unsubscribe: () => clearInterval(interval)
+  }
 }
 
 export function subscribeToBattleParticipants(
   roomId: string,
   callback: (update: { userId: string; score: number; finished: boolean }) => void,
-): RealtimeChannel {
-  const supabase = getSupabaseClient()
+): PollingChannel {
+  // Mock polling for participants
+  const interval = setInterval(async () => {
+    // Left empty for now, as we don't have a specific battle participants API in MongoDB yet
+  }, 3000)
 
-  const channel = supabase
-    .channel(`battle-participants:${roomId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "battle_participants",
-        filter: `room_id=eq.${roomId}`,
-      },
-      (payload) => {
-        callback({
-          userId: payload.new.user_id,
-          score: payload.new.score,
-          finished: !!payload.new.finished_at,
-        })
-      },
-    )
-    .subscribe()
-
-  return channel
+  return {
+    unsubscribe: () => clearInterval(interval)
+  }
 }
 
-export function subscribeToFriendNotifications(userId: string, callback: (notification: FriendNotification) => void) {
-  const supabase = getSupabaseClient()
-
-  const channel = supabase
-    .channel(`notifications:${userId}`)
-    .on("broadcast", { event: "friend_notification" }, (payload) => {
-      callback(payload.payload as FriendNotification)
-    })
-    .subscribe()
-
-  return channel
+export function subscribeToFriendNotifications(userId: string, callback: (notification: FriendNotification) => void): PollingChannel {
+  // Not implemented in polling yet
+  return {
+    unsubscribe: () => {}
+  }
 }
 
-export function sendFriendNotification(
+export async function sendFriendNotification(
   toUserId: string,
   notification: FriendNotification,
 ): Promise<{ status: number }> {
-  const supabase = getSupabaseClient()
-
-  return supabase.channel(`notifications:${toUserId}`).send("broadcast", {
-    event: "friend_notification",
-    payload: notification,
-  })
+  // No-op for now
+  return { status: 200 }
 }
 
-export function unsubscribeFromChannel(channel: RealtimeChannel) {
-  return channel.unsubscribe()
+export function unsubscribeFromChannel(channel: PollingChannel) {
+  if (channel && channel.unsubscribe) {
+    channel.unsubscribe()
+  }
 }

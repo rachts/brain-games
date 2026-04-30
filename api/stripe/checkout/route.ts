@@ -1,34 +1,19 @@
-import { createServerClient } from "@supabase/ssr"
-import { cookies } from "next/headers"
 import { type NextRequest, NextResponse } from "next/server"
 import { createCheckoutSession } from "@/lib/stripe"
+import { getTokenFromRequest, verifyToken } from "@/lib/jwt"
+import connectDB from "@/lib/mongodb"
 
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll()
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-          },
-        },
-      },
-    )
-
-    const user = await supabase.auth.getUser()
-    if (!user.data.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    await connectDB()
+    const token = getTokenFromRequest(request)
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const decoded = verifyToken(token)
+    if (!decoded) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
     const { plan } = await request.json()
 
-    const session = await createCheckoutSession(user.data.user.id, plan)
+    const session = await createCheckoutSession(decoded.userId, plan)
 
     return NextResponse.json({ sessionId: session.id })
   } catch (error) {

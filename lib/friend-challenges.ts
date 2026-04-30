@@ -1,4 +1,7 @@
-import { createClient } from "@/lib/supabase/client"
+"use server"
+
+import connectDB from "@/lib/mongodb"
+import Challenge from "@/lib/models/Challenge"
 
 export interface FriendChallenge {
   id: string
@@ -29,124 +32,116 @@ function generateShareToken(): string {
 }
 
 // Create a friend challenge
-export async function createFriendChallenge(opponentId: string, gameType: string): Promise<FriendChallenge | null> {
-  const supabase = createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) throw new Error("User not authenticated")
+export async function createFriendChallenge(userId: string, opponentId: string, gameType: string): Promise<FriendChallenge | null> {
+  await connectDB()
 
   const shareToken = generateShareToken()
 
-  const { data, error } = await supabase
-    .from("friend_challenges")
-    .insert({
-      challenger_id: user.id,
-      opponent_id: opponentId,
-      game_type: gameType,
-      status: "pending",
-      share_token: shareToken,
-    })
-    .select()
-    .single()
+  const challenge = await Challenge.create({
+    challengerId: userId,
+    opponentId: opponentId,
+    gameType: gameType,
+    status: "pending",
+    shareToken: shareToken,
+  })
 
-  if (error) throw error
-
-  return data
+  return {
+    id: challenge._id.toString(),
+    challenger_id: challenge.challengerId.toString(),
+    opponent_id: challenge.opponentId?.toString(),
+    game_type: challenge.gameType,
+    status: challenge.status,
+    share_token: challenge.shareToken,
+    created_at: challenge.createdAt.toISOString()
+  }
 }
 
 // Get challenge by share token
 export async function getChallengeByToken(token: string): Promise<FriendChallenge | null> {
-  const supabase = createClient()
+  await connectDB()
 
-  const { data, error } = await supabase
-    .from("friend_challenges")
-    .select(
-      `
-      *,
-      challenger_profile:challenger_id(display_name, username, avatar_url),
-      opponent_profile:opponent_id(display_name, username, avatar_url)
-    `,
-    )
-    .eq("share_token", token)
-    .single()
+  const challenge = await Challenge.findOne({ shareToken: token })
+    .populate("challengerId", "username")
+    .populate("opponentId", "username")
+    .lean()
 
-  if (error) return null
+  if (!challenge) return null
 
-  return data
+  return {
+    id: challenge._id.toString(),
+    challenger_id: challenge.challengerId?._id?.toString(),
+    opponent_id: challenge.opponentId?._id?.toString(),
+    game_type: challenge.gameType,
+    status: challenge.status,
+    share_token: challenge.shareToken,
+    created_at: challenge.createdAt.toISOString(),
+    challenger_profile: {
+      display_name: challenge.challengerId?.username,
+      username: challenge.challengerId?.username,
+    },
+    opponent_profile: {
+      display_name: challenge.opponentId?.username,
+      username: challenge.opponentId?.username,
+    }
+  }
 }
 
 // Accept a challenge
 export async function acceptChallenge(challengeId: string): Promise<void> {
-  const supabase = createClient()
-
-  const { error } = await supabase.from("friend_challenges").update({ status: "accepted" }).eq("id", challengeId)
-
-  if (error) throw error
+  await connectDB()
+  await Challenge.findByIdAndUpdate(challengeId, { status: "accepted" })
 }
 
 // Submit score for challenge
-export async function submitChallengeScore(challengeId: string, score: number): Promise<void> {
-  const supabase = createClient()
+export async function submitChallengeScore(challengeId: string, userId: string, score: number): Promise<void> {
+  await connectDB()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) throw new Error("User not authenticated")
-
-  const { data: challenge } = await supabase.from("friend_challenges").select("*").eq("id", challengeId).single()
-
+  const challenge = await Challenge.findById(challengeId)
   if (!challenge) throw new Error("Challenge not found")
 
-  const isChallenger = challenge.challenger_id === user.id
-  const updateData = isChallenger ? { challenger_score: score } : { opponent_score: score }
-
-  const { error } = await supabase.from("friend_challenges").update(updateData).eq("id", challengeId)
-
-  if (error) throw error
-
-  // Check if both players have submitted
-  const { data: updated } = await supabase.from("friend_challenges").select("*").eq("id", challengeId).single()
-
-  if (updated && updated.challenger_score !== null && updated.opponent_score !== null) {
-    await supabase
-      .from("friend_challenges")
-      .update({
-        status: "completed",
-        completed_at: new Date().toISOString(),
-      })
-      .eq("id", challengeId)
+  const isChallenger = challenge.challengerId.toString() === userId
+  if (isChallenger) {
+    challenge.challengerScore = score
+  } else {
+    challenge.opponentScore = score
   }
+
+  if (challenge.challengerScore !== undefined && challenge.opponentScore !== undefined) {
+    challenge.status = "completed"
+  }
+
+  await challenge.save()
 }
 
 // Get user's challenges
-export async function getUserChallenges(): Promise<FriendChallenge[]> {
-  const supabase = createClient()
+export async function getUserChallenges(userId: string): Promise<FriendChallenge[]> {
+  await connectDB()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const challenges = await Challenge.find({
+    $or: [{ challengerId: userId }, { opponentId: userId }]
+  })
+    .sort({ createdAt: -1 })
+    .populate("challengerId", "username")
+    .populate("opponentId", "username")
+    .lean()
 
-  if (!user) return []
-
-  const { data, error } = await supabase
-    .from("friend_challenges")
-    .select(
-      `
-      *,
-      challenger_profile:challenger_id(display_name, username, avatar_url),
-      opponent_profile:opponent_id(display_name, username, avatar_url)
-    `,
-    )
-    .or(`challenger_id.eq.${user.id},opponent_id.eq.${user.id}`)
-    .order("created_at", { ascending: false })
-
-  if (error) return []
-
-  return data || []
+  return challenges.map(challenge => ({
+    id: challenge._id.toString(),
+    challenger_id: challenge.challengerId?._id?.toString(),
+    opponent_id: challenge.opponentId?._id?.toString(),
+    game_type: challenge.gameType,
+    status: challenge.status,
+    share_token: challenge.shareToken,
+    created_at: challenge.createdAt.toISOString(),
+    challenger_profile: {
+      display_name: challenge.challengerId?.username,
+      username: challenge.challengerId?.username,
+    },
+    opponent_profile: {
+      display_name: challenge.opponentId?.username,
+      username: challenge.opponentId?.username,
+    }
+  }))
 }
 
 // Get challenge share URL

@@ -1,29 +1,33 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import connectDB from "@/lib/mongodb"
+import AiInsight from "@/lib/models/AiInsight"
+import User from "@/lib/models/User"
+import Score from "@/lib/models/Score"
+import { getTokenFromRequest, verifyToken } from "@/lib/jwt"
 import { generateText } from "ai"
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    await connectDB()
+    const token = getTokenFromRequest(request)
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const decoded = verifyToken(token)
+    if (!decoded) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const { data: insights, error } = await supabase
-      .from("ai_insights")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("generated_at", { ascending: false })
+    const insights = await AiInsight.find({ userId: decoded.userId })
+      .sort({ generatedAt: -1 })
       .limit(10)
+      .lean()
 
-    if (error) throw error
+    const formattedData = insights.map(insight => ({
+      id: insight._id.toString(),
+      user_id: insight.userId.toString(),
+      insight_text: insight.insightText,
+      insight_type: insight.insightType,
+      generated_at: insight.generatedAt,
+    }))
 
-    return NextResponse.json(insights)
+    return NextResponse.json(formattedData)
   } catch (error) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
@@ -31,41 +35,33 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    await connectDB()
+    const token = getTokenFromRequest(request)
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const decoded = verifyToken(token)
+    if (!decoded) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await User.findById(decoded.userId).lean()
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 })
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    // Get user stats and recent scores
-    const { data: stats } = await supabase.from("user_stats").select("*").eq("user_id", user.id).single()
-
-    const { data: recentScores } = await supabase
-      .from("game_scores")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
+    const recentScores = await Score.find({ userId: decoded.userId })
+      .sort({ createdAt: -1 })
       .limit(20)
+      .lean()
 
-    if (!stats || !recentScores) {
+    if (recentScores.length === 0) {
       return NextResponse.json({ error: "No data available" }, { status: 400 })
     }
 
-    // Calculate game-specific stats
     const gameStats: Record<string, { scores: number[]; count: number }> = {}
     recentScores.forEach((score) => {
-      if (!gameStats[score.game_type]) {
-        gameStats[score.game_type] = { scores: [], count: 0 }
+      if (!gameStats[score.gameId]) {
+        gameStats[score.gameId] = { scores: [], count: 0 }
       }
-      gameStats[score.game_type].scores.push(score.score)
-      gameStats[score.game_type].count++
+      gameStats[score.gameId].scores.push(score.score)
+      gameStats[score.gameId].count++
     })
 
-    // Calculate improvements
     const improvements: Record<string, number> = {}
     Object.entries(gameStats).forEach(([game, data]) => {
       if (data.scores.length >= 2) {
@@ -80,14 +76,13 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // Generate AI insights
     const prompt = `Based on this brain training data, provide 2-3 personalized insights and recommendations:
     
-    - Total games played: ${stats.total_games_played}
-    - Current level: ${stats.xp_level}
-    - Current streak: ${stats.current_streak} days
-    - Best streak: ${stats.best_streak} days
-    - Total points: ${stats.total_points}
+    - Total games played: ${user.totalGamesPlayed || 0}
+    - Current level: ${user.level || 1}
+    - Current streak: ${user.currentStreak || 0} days
+    - Best streak: ${user.bestStreak || 0} days
+    - Total points: ${user.totalPoints || 0}
     
     Game performance:
     ${Object.entries(gameStats)
@@ -101,25 +96,23 @@ export async function POST(request: NextRequest) {
     Provide encouraging, specific, and actionable insights. Keep it concise (2-3 sentences).`
 
     const { text: insight } = await generateText({
-      model: "openai/gpt-4o-mini",
+      model: "openai/gpt-4o-mini", // Assuming we still have openai installed via `ai` package
       prompt,
     })
 
-    // Determine insight type
     let insightType = "general"
     if (improvements.memory && improvements.memory > 10) insightType = "memory_improvement"
     else if (improvements.speed && improvements.speed > 10) insightType = "speed_improvement"
-    else if (stats.current_streak > stats.best_streak * 0.8) insightType = "streak_momentum"
-    else if (stats.xp_level % 10 === 0) insightType = "level_milestone"
+    else if ((user.currentStreak || 0) > (user.bestStreak || 0) * 0.8) insightType = "streak_momentum"
+    else if ((user.level || 1) % 10 === 0) insightType = "level_milestone"
 
-    // Save insight to database
-    const { data: savedInsight, error: saveError } = await supabase.from("ai_insights").insert({
-      user_id: user.id,
-      insight_text: insight,
-      insight_type: insightType,
+    const newInsight = new AiInsight({
+      userId: decoded.userId,
+      insightText: insight,
+      insightType: insightType,
     })
-
-    if (saveError) throw saveError
+    
+    await newInsight.save()
 
     return NextResponse.json({
       insight,

@@ -1,42 +1,67 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import connectDB from "@/lib/mongodb"
+import User from "@/lib/models/User"
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    await connectDB()
     const gameType = request.nextUrl.searchParams.get("gameType")
     const limit = Number.parseInt(request.nextUrl.searchParams.get("limit") || "100")
 
-    const query = supabase
-      .from("user_stats")
-      .select("user_id, total_points, xp_level, current_streak, profiles(display_name, username, avatar_url)")
-      .order("total_points", { ascending: false })
+    // Sort by totalPoints for now
+    const users = await User.find({})
+      .sort({ totalPoints: -1 })
       .limit(limit)
+      .select("username totalPoints level currentStreak")
+      .lean()
 
-    const { data, error } = await query
+    const formattedData = users.map(user => ({
+      user_id: user._id.toString(),
+      total_points: user.totalPoints || 0,
+      xp_level: user.level || 1,
+      current_streak: user.currentStreak || 0,
+      profiles: {
+        display_name: user.username,
+        username: user.username,
+        avatar_url: null
+      }
+    }))
 
-    if (error) throw error
-
-    return NextResponse.json(data)
+    return NextResponse.json(formattedData)
   } catch (error) {
+    console.error("Leaderboard GET Error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    await connectDB()
     const { gameType } = await request.json()
 
-    const { data, error } = await supabase.rpc("get_game_leaderboard", {
-      p_game_type: gameType,
-      p_limit: 50,
-    })
+    // Mocking specific game leaderboard by fetching all for now,
+    // since we might not have game-specific score totals rolled up yet.
+    const users = await User.find({})
+      .sort({ totalPoints: -1 })
+      .limit(50)
+      .select("username totalPoints level currentStreak")
+      .lean()
 
-    if (error) throw error
+    const formattedData = users.map(user => ({
+      user_id: user._id.toString(),
+      total_points: user.totalPoints || 0,
+      xp_level: user.level || 1,
+      current_streak: user.currentStreak || 0,
+      profiles: {
+        display_name: user.username,
+        username: user.username,
+        avatar_url: null
+      }
+    }))
 
-    return NextResponse.json(data)
+    return NextResponse.json(formattedData)
   } catch (error) {
+    console.error("Leaderboard POST Error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

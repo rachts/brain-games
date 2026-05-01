@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       case "customer.subscription.created":
       case "customer.subscription.updated": {
         const subscription = event.data.object as Stripe.Subscription
-        const userId = subscription.client_reference_id
+        const userId = subscription.metadata?.userId
 
         if (userId) {
           const planType = subscription.items.data[0]?.price?.metadata?.plan_type || "pro"
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription
-        const userId = subscription.client_reference_id
+        const userId = subscription.metadata?.userId
 
         if (userId) {
           await User.findByIdAndUpdate(userId, {

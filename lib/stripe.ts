@@ -38,6 +38,14 @@ export async function createCheckoutSession(userId: string, planType: "pro" | "e
   const session = await stripe.checkout.sessions.create({
     customer_email: undefined,
     client_reference_id: userId,
+    metadata: {
+      userId,
+    },
+    subscription_data: {
+      metadata: {
+        userId,
+      },
+    },
     line_items: [
       {
         price_data: {
